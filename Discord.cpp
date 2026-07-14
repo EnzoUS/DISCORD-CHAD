@@ -1,4 +1,3 @@
-
 #define _CRT_SECURE_NO_WARNINGS
 #include <windows.h>
 #include <winhttp.h>
@@ -14,7 +13,8 @@
 #pragma comment(lib, "winhttp.lib")
 #pragma comment(lib, "comctl32.lib")
 #pragma comment(lib, "shlwapi.lib")
-HWND hTokenEdit, hChannelsEdit, hPath1Edit, hPath2Edit, hIntervalEdit, hTextEdit, hLogList, hStartBtn;
+
+HWND hTokenEdit, hChannelEdits[5], hPath1Edit, hPath2Edit, hIntervalEdit, hTextEdit, hLogList, hStartBtn;
 std::atomic<bool> g_Running{ false };
 HANDLE hSpamThread = NULL;
 std::vector<BYTE> ReadFileBytes(const std::wstring& path) {
@@ -27,7 +27,6 @@ std::vector<BYTE> ReadFileBytes(const std::wstring& path) {
         return buffer;
     return {};
 }
-
 std::string GenBoundary() {
     return "----DiscordSpammerBoundary" + std::to_string(GetTickCount64());
 }
@@ -64,7 +63,6 @@ std::vector<BYTE> BuildMultipart(
         add("Content-Disposition: form-data; name=\"content\"" + end + end);
         add(content + end);
     }
-
     add(dash + boundary + dash + end);
     return data;
 }
@@ -78,26 +76,27 @@ void AddLog(const std::wstring& msg) {
 DWORD WINAPI SpamProc(LPVOID) {
     g_Running = true;
     EnableWindow(hStartBtn, FALSE);
-    WCHAR token[2048], channels[1024], path1[260], path2[260], intervalStr[10], customText[4096];
+    WCHAR token[2048], path1[260], path2[260], intervalStr[10], customText[4096];
     GetWindowText(hTokenEdit, token, 2048);
-    GetWindowText(hChannelsEdit, channels, 1024);
     GetWindowText(hPath1Edit, path1, 260);
     GetWindowText(hPath2Edit, path2, 260);
     GetWindowText(hIntervalEdit, intervalStr, 10);
     GetWindowText(hTextEdit, customText, 4096);
     int interval = _wtoi(intervalStr);
     if (interval < 1) interval = 1;
-    if (wcslen(token) == 0 || wcslen(channels) == 0) {
-        AddLog(L"Error: Token or channels empty.");
+    std::vector<std::wstring> channelIds;
+    for (int i = 0; i < 5; ++i) {
+        WCHAR chId[100];
+        GetWindowText(hChannelEdits[i], chId, 100);
+        if (wcslen(chId) > 0)
+            channelIds.push_back(chId);
+    }
+    if (wcslen(token) == 0 || channelIds.empty()) {
+        AddLog(L"Error: Token or all channel IDs empty.");
         g_Running = false;
         EnableWindow(hStartBtn, TRUE);
         return 0;
     }
-    std::wstring chStr(channels);
-    std::wistringstream wiss(chStr);
-    std::vector<std::wstring> channelIds;
-    std::wstring id;
-    while (wiss >> id) channelIds.push_back(id);
     std::vector<BYTE> img1 = ReadFileBytes(path1);
     std::vector<BYTE> img2 = ReadFileBytes(path2);
     if (img1.empty() || img2.empty()) {
@@ -119,7 +118,6 @@ DWORD WINAPI SpamProc(LPVOID) {
         for (const auto& chId : channelIds) {
             std::string boundary = GenBoundary();
             std::vector<BYTE> payload = BuildMultipart(boundary, img1, fname1, img2, fname2, content);
-
             std::wstring path = L"/api/v9/channels/" + chId + L"/messages";
             HINTERNET hConnect = WinHttpConnect(hSession, L"discord.com", 443, 0);
             HINTERNET hRequest = WinHttpOpenRequest(hConnect, L"POST", path.c_str(), NULL, NULL, NULL, WINHTTP_FLAG_SECURE);
@@ -145,13 +143,11 @@ DWORD WINAPI SpamProc(LPVOID) {
         }
         if (g_Running) Sleep(interval * 1000);
     }
-
     WinHttpCloseHandle(hSession);
     AddLog(L"Spam stopped.");
     EnableWindow(hStartBtn, TRUE);
     return 0;
 }
-
 void BrowseFile(HWND edit, const wchar_t* filter) {
     OPENFILENAME ofn = { sizeof(ofn) };
     WCHAR file[260] = { 0 };
@@ -169,36 +165,46 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
         CreateWindow(L"STATIC", L"Discord Token:", WS_CHILD | WS_VISIBLE, 10, 10, 120, 20, hWnd, NULL, NULL, NULL);
         hTokenEdit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 140, 8, 550, 20, hWnd, (HMENU)100, NULL, NULL);
         SendMessage(hTokenEdit, EM_SETLIMITTEXT, 0, 0);
-        CreateWindow(L"STATIC", L"Channel IDs (space):", WS_CHILD | WS_VISIBLE, 10, 40, 120, 20, hWnd, NULL, NULL, NULL);
-        hChannelsEdit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 140, 38, 550, 20, hWnd, (HMENU)101, NULL, NULL);
-        CreateWindow(L"STATIC", L"Image 1:", WS_CHILD | WS_VISIBLE, 10, 70, 80, 20, hWnd, NULL, NULL, NULL);
-        hPath1Edit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 100, 68, 400, 20, hWnd, (HMENU)102, NULL, NULL);
-        CreateWindow(L"BUTTON", L"Browse...", WS_CHILD | WS_VISIBLE, 510, 68, 80, 20, hWnd, (HMENU)200, NULL, NULL);
-        CreateWindow(L"STATIC", L"Image 2:", WS_CHILD | WS_VISIBLE, 10, 100, 80, 20, hWnd, NULL, NULL, NULL);
-        hPath2Edit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 100, 98, 400, 20, hWnd, (HMENU)103, NULL, NULL);
-        CreateWindow(L"BUTTON", L"Browse...", WS_CHILD | WS_VISIBLE, 510, 98, 80, 20, hWnd, (HMENU)201, NULL, NULL);
-        CreateWindow(L"STATIC", L"Interval (sec):", WS_CHILD | WS_VISIBLE, 10, 130, 80, 20, hWnd, NULL, NULL, NULL);
-        hIntervalEdit = CreateWindow(L"EDIT", L"5", WS_CHILD | WS_VISIBLE | WS_BORDER, 100, 128, 50, 20, hWnd, (HMENU)104, NULL, NULL);
-        CreateWindow(L"STATIC", L"Text/Link:", WS_CHILD | WS_VISIBLE, 10, 160, 80, 20, hWnd, NULL, NULL, NULL);
-        hTextEdit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_MULTILINE, 100, 158, 550, 40, hWnd, (HMENU)105, NULL, NULL);
+        int yBase = 40;
+        for (int i = 0; i < 5; ++i) {
+            std::wstring label = L"Channel " + std::to_wstring(i + 1) + L":";
+            CreateWindow(L"STATIC", label.c_str(), WS_CHILD | WS_VISIBLE, 10, yBase, 80, 20, hWnd, NULL, NULL, NULL);
+            hChannelEdits[i] = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 100, yBase - 2, 200, 20, hWnd, (HMENU)(200 + i), NULL, NULL);
+            yBase += 30;
+        }
+        CreateWindow(L"STATIC", L"Image 1:", WS_CHILD | WS_VISIBLE, 10, yBase, 80, 20, hWnd, NULL, NULL, NULL);
+        hPath1Edit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 100, yBase - 2, 400, 20, hWnd, (HMENU)110, NULL, NULL);
+        CreateWindow(L"BUTTON", L"Browse...", WS_CHILD | WS_VISIBLE, 510, yBase - 2, 80, 20, hWnd, (HMENU)300, NULL, NULL);
+        yBase += 30;
+        CreateWindow(L"STATIC", L"Image 2:", WS_CHILD | WS_VISIBLE, 10, yBase, 80, 20, hWnd, NULL, NULL, NULL);
+        hPath2Edit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL, 100, yBase - 2, 400, 20, hWnd, (HMENU)111, NULL, NULL);
+        CreateWindow(L"BUTTON", L"Browse...", WS_CHILD | WS_VISIBLE, 510, yBase - 2, 80, 20, hWnd, (HMENU)301, NULL, NULL);
+        yBase += 30;
+        CreateWindow(L"STATIC", L"Interval (sec):", WS_CHILD | WS_VISIBLE, 10, yBase, 80, 20, hWnd, NULL, NULL, NULL);
+        hIntervalEdit = CreateWindow(L"EDIT", L"5", WS_CHILD | WS_VISIBLE | WS_BORDER, 100, yBase - 2, 50, 20, hWnd, (HMENU)112, NULL, NULL);
+        yBase += 30;
+        CreateWindow(L"STATIC", L"Text/Link:", WS_CHILD | WS_VISIBLE, 10, yBase, 80, 20, hWnd, NULL, NULL, NULL);
+        hTextEdit = CreateWindow(L"EDIT", L"", WS_CHILD | WS_VISIBLE | WS_BORDER | ES_AUTOHSCROLL | ES_MULTILINE, 100, yBase - 2, 550, 40, hWnd, (HMENU)113, NULL, NULL);
         SendMessage(hTextEdit, EM_SETLIMITTEXT, 0, 0);
-        hStartBtn = CreateWindow(L"BUTTON", L"Start Spam", WS_CHILD | WS_VISIBLE, 10, 210, 120, 25, hWnd, (HMENU)300, NULL, NULL);
-        CreateWindow(L"BUTTON", L"Stop", WS_CHILD | WS_VISIBLE, 140, 210, 120, 25, hWnd, (HMENU)301, NULL, NULL);
+        yBase += 50;
+        hStartBtn = CreateWindow(L"BUTTON", L"Start Spam", WS_CHILD | WS_VISIBLE, 10, yBase, 120, 25, hWnd, (HMENU)400, NULL, NULL);
+        CreateWindow(L"BUTTON", L"Stop", WS_CHILD | WS_VISIBLE, 140, yBase, 120, 25, hWnd, (HMENU)401, NULL, NULL);
+        yBase += 30;
         hLogList = CreateWindow(L"LISTBOX", NULL, WS_CHILD | WS_VISIBLE | WS_VSCROLL | LBS_NOINTEGRALHEIGHT,
-            10, 250, 700, 120, hWnd, (HMENU)302, NULL, NULL);
+            10, yBase, 700, 120, hWnd, (HMENU)402, NULL, NULL);
         break;
     }
     case WM_COMMAND: {
         int id = LOWORD(wParam);
-        if (id == 200) BrowseFile(hPath1Edit, L"Images (*.png;*.jpg;*.gif)\0*.png;*.jpg;*.gif\0All\0*.*\0");
-        if (id == 201) BrowseFile(hPath2Edit, L"Images (*.png;*.jpg;*.gif)\0*.png;*.jpg;*.gif\0All\0*.*\0");
-        if (id == 300) {
+        if (id == 300) BrowseFile(hPath1Edit, L"Images (*.png;*.jpg;*.gif)\0*.png;*.jpg;*.gif\0All\0*.*\0");
+        if (id == 301) BrowseFile(hPath2Edit, L"Images (*.png;*.jpg;*.gif)\0*.png;*.jpg;*.gif\0All\0*.*\0");
+        if (id == 400) {
             if (!g_Running) {
                 DWORD tid;
                 hSpamThread = CreateThread(NULL, 0, SpamProc, NULL, 0, &tid);
             }
         }
-        if (id == 301) {
+        if (id == 401) {
             if (g_Running) {
                 g_Running = false;
                 AddLog(L"Stopping...");
@@ -218,7 +224,6 @@ LRESULT CALLBACK WndProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam) {
     }
     return 0;
 }
-
 int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     INITCOMMONCONTROLSEX icc = { sizeof(icc), ICC_STANDARD_CLASSES };
     InitCommonControlsEx(&icc);
@@ -229,7 +234,7 @@ int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE, LPSTR, int nCmdShow) {
     wc.lpszClassName = L"DISCORDSPAMGUI";
     RegisterClass(&wc);
     HWND hWnd = CreateWindow(wc.lpszClassName, L"https://github.com/EnzoUS", WS_OVERLAPPEDWINDOW,
-        CW_USEDEFAULT, CW_USEDEFAULT, 750, 430, NULL, NULL, hInstance, NULL);
+        CW_USEDEFAULT, CW_USEDEFAULT, 750, 570, NULL, NULL, hInstance, NULL);
     ShowWindow(hWnd, nCmdShow);
     UpdateWindow(hWnd);
     MSG msg;
